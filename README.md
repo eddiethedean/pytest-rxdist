@@ -6,7 +6,7 @@ The Python package name is **`pytest-rxdist`** (import as `pytest_rxdist`).
 
 ## Status
 
-Milestone 0–3 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, and a timing-informed smart scheduler.
+Milestone 0–4 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, a timing-informed smart scheduler, and warm worker reuse.
 
 Published on PyPI as `pytest-rxdist` (currently an early, experimental build).
 
@@ -44,6 +44,13 @@ pytest -p pytest_rxdist --numprocesses 4
 pytest -p pytest_rxdist --numprocesses auto
 ```
 
+Enable warm worker reuse (Milestone 4):
+
+```bash
+pytest -p pytest_rxdist --numprocesses auto --rxdist-reuse safe
+pytest -p pytest_rxdist --numprocesses auto --rxdist-reuse off
+```
+
 Enable smart scheduling (Milestone 3):
 
 ```bash
@@ -71,9 +78,14 @@ pytest -p pytest_rxdist --rxdist-debug
 
 ## Current limitations
 
-- Worker execution is conservative: each test is executed via a subprocess `python -m pytest <nodeid>`.
 - CLI compatibility is not complete yet: this MVP uses `--numprocesses` (not `-n`).
 - Smart scheduling uses historical avg durations when available, and falls back gracefully when timings are missing.
+- In-process reuse means Python process state can persist across tests within a worker (similar to normal pytest behavior in a single process). Use `--rxdist-reuse off` if you need stricter isolation.
+
+## Worker reuse (Milestone 4)
+
+- `--rxdist-reuse safe` (default): reuse long-lived workers and run nodeids in-process to reduce import/startup overhead.
+- `--rxdist-reuse off`: fallback mode that runs each nodeid in a separate `python -m pytest <nodeid>` invocation (slower, more isolated).
 
 ## Timing store (Milestone 2)
 

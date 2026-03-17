@@ -114,6 +114,13 @@
 
 **Outcome**: reduce overhead from process startup, imports, and repeated initialization.
 
+- **Progress**
+  - [x] In-process worker runner (warm workers run multiple nodeids without spawning Python per test)
+  - [x] Safe-by-default reuse mode (`--rxdist-reuse=safe`) with `off` escape hatch
+  - [x] Conservative per-test cleanup in worker
+  - [x] Safe-mode respawn on worker failure (best-effort)
+  - [x] Tests + basic benchmark proof (heavy-import suite faster with reuse enabled)
+
 - **Scope**
   - Persistent workers within a single pytest invocation (and optionally across runs later).
   - Cache imports; optionally cache selected fixture setup (only if it is safe/opt-in).

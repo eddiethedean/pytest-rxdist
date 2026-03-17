@@ -29,7 +29,7 @@ def test_worker_crash_is_handled_and_reports_failure(tmp_path: Path):
 
     try:
         p = _run_pytest(
-            ["-p", "pytest_rxdist", "-q", "--numprocesses", "2", str(testfile)],
+            ["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "--rxdist-reuse", "off", str(testfile)],
             env={"PYTEST_RXDIST_WORKER_CRASH_AFTER": "1"},
         )
         assert p.returncode != 0

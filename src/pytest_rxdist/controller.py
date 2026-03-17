@@ -14,16 +14,24 @@ from .scheduler import SmartSchedule, smart_schedule
 from .timing_store import TimingStore, default_timings_path
 
 
-@dataclass(frozen=True)
+@dataclass
 class WorkerProcess:
     proc: subprocess.Popen[str]
     idx: int
 
 
 class RXDistController:
-    def __init__(self, *, num_workers: int, scheduler: str = "baseline", debug: bool = False):
+    def __init__(
+        self,
+        *,
+        num_workers: int,
+        scheduler: str = "baseline",
+        reuse_mode: str = "safe",
+        debug: bool = False,
+    ):
         self.num_workers = max(1, int(num_workers))
         self.scheduler = scheduler
+        self.reuse_mode = reuse_mode
         self.debug = debug
 
         self.last_schedule: SmartSchedule | None = None
@@ -31,6 +39,7 @@ class RXDistController:
     def _spawn_worker(self, idx: int) -> WorkerProcess:
         env = dict(os.environ)
         env["PYTEST_RXDIST_WORKER"] = "1"
+        env["PYTEST_RXDIST_REUSE"] = self.reuse_mode
         cmd = [sys.executable, "-m", "pytest_rxdist._worker_main"]
         proc = subprocess.Popen(
             cmd,
@@ -91,6 +100,17 @@ class RXDistController:
                 return False
             return False
 
+        def respawn_worker(w: WorkerProcess) -> WorkerProcess:
+            # Replace a dead/bad worker with a fresh one (safe mode best-effort).
+            try:
+                if w.proc.poll() is None:
+                    w.proc.terminate()
+            except Exception:
+                pass
+            new_w = self._spawn_worker(w.idx)
+            wait_hello(new_w)
+            return new_w
+
         if self.scheduler == "smart":
             # Build a predictive schedule using historical timings.
             timings_path = default_timings_path(Path.cwd())
@@ -106,18 +126,29 @@ class RXDistController:
             self.last_schedule = schedule
 
             def run_worker_queue(w: WorkerProcess, queue_nodeids: list[str]) -> None:
-                assert w.proc.stdin is not None
-                assert w.proc.stdout is not None
+                w_local = w
+                assert w_local.proc.stdin is not None
+                assert w_local.proc.stdout is not None
+                respawned = False
                 for nodeid in queue_nodeids:
-                    send_message(w.proc.stdin, "run", {"nodeid": nodeid})
-                    ok = wait_result_for_nodeid(w, nodeid)
+                    send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
+                    ok = wait_result_for_nodeid(w_local, nodeid)
                     if not ok:
+                        if self.reuse_mode == "safe" and not respawned:
+                            respawned = True
+                            w_local = respawn_worker(w_local)
+                            assert w_local.proc.stdin is not None
+                            assert w_local.proc.stdout is not None
+                            send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
+                            ok2 = wait_result_for_nodeid(w_local, nodeid)
+                            if ok2:
+                                continue
                         record_worker_failure(nodeid, "worker died before reporting result")
-                        # Mark remaining assigned work as failed as well.
                         for remaining in queue_nodeids[queue_nodeids.index(nodeid) + 1 :]:
                             record_worker_failure(remaining, "worker died before running test")
                         break
-                send_message(w.proc.stdin, "shutdown", {})
+                if w_local.proc.stdin is not None:
+                    send_message(w_local.proc.stdin, "shutdown", {})
 
             threads = [
                 threading.Thread(
@@ -134,20 +165,30 @@ class RXDistController:
                 work_q.put(nid)
 
             def worker_thread(w: WorkerProcess) -> None:
-                assert w.proc.stdin is not None
-                assert w.proc.stdout is not None
+                w_local = w
+                assert w_local.proc.stdin is not None
+                assert w_local.proc.stdout is not None
+                respawned = False
                 while True:
                     try:
                         nodeid = work_q.get_nowait()
                     except queue.Empty:
-                        send_message(w.proc.stdin, "shutdown", {})
+                        send_message(w_local.proc.stdin, "shutdown", {})
                         return
 
-                    send_message(w.proc.stdin, "run", {"nodeid": nodeid})
-                    ok = wait_result_for_nodeid(w, nodeid)
+                    send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
+                    ok = wait_result_for_nodeid(w_local, nodeid)
                     if not ok:
+                        if self.reuse_mode == "safe" and not respawned:
+                            respawned = True
+                            w_local = respawn_worker(w_local)
+                            assert w_local.proc.stdin is not None
+                            assert w_local.proc.stdout is not None
+                            send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
+                            ok2 = wait_result_for_nodeid(w_local, nodeid)
+                            if ok2:
+                                continue
                         record_worker_failure(nodeid, "worker died before reporting result")
-                        # Drain remaining queue as failures to avoid hang.
                         while True:
                             try:
                                 remaining = work_q.get_nowait()

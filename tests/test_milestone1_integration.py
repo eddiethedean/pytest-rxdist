@@ -27,13 +27,13 @@ def _run_pytest_env(args: list[str], env: dict[str, str]) -> subprocess.Complete
 
 
 def test_parallel_n2_passes():
-    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "tests/test_smoke.py"])
+    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "--rxdist-reuse", "safe", "tests/test_smoke.py"])
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
     assert "2 passed" in (p.stdout + p.stderr)
 
 
 def test_parallel_auto_passes():
-    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "auto", "tests/test_smoke.py"])
+    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "auto", "--rxdist-reuse", "safe", "tests/test_smoke.py"])
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
     assert "2 passed" in (p.stdout + p.stderr)
 
@@ -50,7 +50,7 @@ def test_failure_attribution_has_nodeid():
         encoding="utf-8",
     )
 
-    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", str(testfile)])
+    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "--rxdist-reuse", "safe", str(testfile)])
     try:
         assert p.returncode != 0
         combined = p.stdout + "\n" + p.stderr
@@ -71,7 +71,7 @@ def test_failure_includes_print_output():
         encoding="utf-8",
     )
 
-    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", str(testfile)])
+    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "--rxdist-reuse", "safe", str(testfile)])
     try:
         assert p.returncode != 0
         combined = p.stdout + "\n" + p.stderr
@@ -100,7 +100,7 @@ def test_concurrency_wall_clock_smoke():
     )
 
     start = time.perf_counter()
-    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", str(testfile)])
+    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "--rxdist-reuse", "safe", str(testfile)])
     elapsed = time.perf_counter() - start
 
     try:
@@ -127,7 +127,7 @@ def test_workers_do_not_recurse():
     # We verify by asserting worker env var isn't leaked to the controller run
     # and the suite still completes.
     assert os.environ.get("PYTEST_RXDIST_WORKER") != "1"
-    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "tests/test_smoke.py"])
+    p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "--rxdist-reuse", "safe", "tests/test_smoke.py"])
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
 
 

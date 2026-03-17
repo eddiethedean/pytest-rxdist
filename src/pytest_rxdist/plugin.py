@@ -32,6 +32,13 @@ def pytest_addoption(parser):
         help="Enable timing persistence + summary output (Milestone 2).",
     )
     group.addoption(
+        "--rxdist-reuse",
+        action="store",
+        default="safe",
+        choices=["off", "safe", "aggressive"],
+        help="Worker reuse mode (off|safe|aggressive). Default: safe. (Milestone 4)",
+    )
+    group.addoption(
         "--rxdist-debug",
         action="store_true",
         default=False,
@@ -123,6 +130,7 @@ def pytest_runtestloop(session):
     controller = RXDistController(
         num_workers=n,
         scheduler=config.getoption("rxdist_scheduler"),
+        reuse_mode=config.getoption("rxdist_reuse"),
         debug=bool(config.getoption("--rxdist-debug")),
     )
     results = controller.run(nodeids)
