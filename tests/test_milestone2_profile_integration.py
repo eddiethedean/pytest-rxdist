@@ -144,3 +144,57 @@ def test_profile_perf_sanity_not_extreme_overhead(tmp_path: Path):
     # Allow a lot of slack for first-time sqlite init, CI noise, etc.
     assert t_prof < max(2.0, t_no * 5.0), f"profiling too slow: no={t_no:.3f}s prof={t_prof:.3f}s"
 
+
+def test_smart_scheduler_uses_timings_and_reports_stats(tmp_path: Path):
+    db = tmp_path / "timings.sqlite3"
+    env = _merged_env({"PYTEST_RXDIST_TIMINGS_PATH": str(db)})
+    # Write the suite under repo-local tests/ so worker subprocesses can resolve
+    # nodeids consistently from the project root.
+    testfile = Path("tests/_rxdist_tmp_imbalanced_suite.py")
+
+    testfile.write_text(
+        "import time\n\n"
+        "def test_slow():\n"
+        "    time.sleep(0.05)\n"
+        "    assert True\n\n"
+        "def test_fast1():\n"
+        "    time.sleep(0.005)\n"
+        "    assert True\n\n"
+        "def test_fast2():\n"
+        "    time.sleep(0.005)\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    # Seed timings.
+    try:
+        seed = _run_pytest(
+            ["-p", "pytest_rxdist", "-q", "--rxdist-profile", str(testfile)],
+            env=env,
+        )
+        assert seed.returncode == 0, seed.stdout + "\n" + seed.stderr
+
+        # Run with smart scheduler and debug on; expect scheduler stats line.
+        run = _run_pytest(
+            [
+                "-p",
+                "pytest_rxdist",
+                "-q",
+                "--numprocesses",
+                "2",
+                "--rxdist-scheduler",
+                "smart",
+                "--rxdist-debug",
+                str(testfile),
+            ],
+            env=env,
+        )
+        assert run.returncode == 0, run.stdout + "\n" + run.stderr
+        combined = run.stdout + "\n" + run.stderr
+        assert "pytest-rxdist: smart_schedule" in combined
+    finally:
+        try:
+            testfile.unlink()
+        except OSError:
+            pass
+

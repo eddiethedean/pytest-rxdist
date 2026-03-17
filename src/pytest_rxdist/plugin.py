@@ -131,6 +131,16 @@ def pytest_runtestloop(session):
     if reporter is not None:
         reporter.write_line(f"pytest-rxdist: ran {len(results)} tests on {n} workers")
 
+    if config.getoption("--rxdist-debug") and reporter is not None:
+        sched = config.getoption("rxdist_scheduler")
+        if sched == "smart" and getattr(controller, "last_schedule", None) is not None:
+            s = controller.last_schedule
+            reporter.write_line(
+                "pytest-rxdist: smart_schedule "
+                f"known={s.known_count} unknown={s.unknown_count} "
+                f"est_makespan={s.estimated_makespan_s:.3f}s"
+            )
+
     if config.getoption("--rxdist-profile"):
         _write_timing_run(config, results)
 

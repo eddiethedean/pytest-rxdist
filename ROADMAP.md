@@ -93,6 +93,12 @@
 
 **Outcome**: reduce idle time and improve makespan using timing history.
 
+- **Progress**
+  - [x] Avg-duration query from SQLite timing store
+  - [x] Smart scheduler (LPT bin packing) with unknown-duration interleave
+  - [x] Controller integration + debug stats (`--rxdist-debug`)
+  - [x] Tests (unit + integration) for smart scheduling + fallback
+
 - **Scope**
   - Scheduling strategies:
     - **Predictive**: greedy bin-packing by historical duration (Longest Processing Time first).
@@ -146,21 +152,7 @@
 
 ---
 
-### Milestone 7 — Distributed execution (multi-machine)
-
-**Outcome**: run workers across multiple machines with minimal user friction.
-
-- **Scope**
-  - Coordinator + remote worker agents.
-  - Transport: start with TCP + authenticated handshake; later consider gRPC/QUIC.
-  - Fault tolerance: worker dropouts, retries, and clear error reporting.
-- **Definition of done**
-  - A simple two-machine demo works reliably on a LAN.
-  - Failures are diagnosable (logs + coordinator summary).
-
----
-
-### Milestone 8 — UX, analytics, and hardening
+### Milestone 7 — UX, analytics, and hardening
 
 **Outcome**: make it production-friendly and easy to adopt.
 

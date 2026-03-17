@@ -6,7 +6,7 @@ The Python package name is **`pytest-rxdist`** (import as `pytest_rxdist`).
 
 ## Status
 
-Milestone 0–2 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, and a local timing store foundation.
+Milestone 0–3 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, and a timing-informed smart scheduler.
 
 Published on PyPI as `pytest-rxdist` (currently an early, experimental build).
 
@@ -44,6 +44,12 @@ pytest -p pytest_rxdist --numprocesses 4
 pytest -p pytest_rxdist --numprocesses auto
 ```
 
+Enable smart scheduling (Milestone 3):
+
+```bash
+pytest -p pytest_rxdist --numprocesses auto --rxdist-scheduler smart
+```
+
 Enable timing persistence + summary output (Milestone 2):
 
 ```bash
@@ -62,20 +68,23 @@ pytest -p pytest_rxdist --rxdist-debug
 - **Lower overhead**: a Rust core to orchestrate workers efficiently
 - **Faster IPC**: move beyond Python pickle toward binary / zero-copy options
 - **Worker reuse**: “warm” workers with cached imports (and carefully controlled caching)
-- **Scales up**: from laptop parallelism to multi-machine distributed execution
 
 ## Current limitations
 
 - Worker execution is conservative: each test is executed via a subprocess `python -m pytest <nodeid>`.
 - CLI compatibility is not complete yet: this MVP uses `--numprocesses` (not `-n`).
-- Scheduling is baseline (shared work queue); smarter strategies come later.
-- Timing store is currently used for summaries only; scheduling doesn’t yet consume it (Milestone 3).
+- Smart scheduling uses historical avg durations when available, and falls back gracefully when timings are missing.
 
 ## Timing store (Milestone 2)
 
 - **Default location**: `.pytest_rxdist/timings.sqlite3` under the pytest root directory.
 - **Reset**: delete `.pytest_rxdist/timings.sqlite3`.
 - **Corruption recovery**: if the DB is invalid, it is rotated to `timings.sqlite3.corrupt.<timestamp>` and rebuilt.
+
+## Smart scheduler (Milestone 3)
+
+- Uses historical timings to predict test duration (average duration per `nodeid`).
+- Unknown-duration tests are interleaved and the scheduler falls back safely when timings are absent/partial.
 
 ## Planned CLI (future)
 

@@ -9,7 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence
 
 
 def env_fingerprint() -> str:
@@ -178,4 +178,30 @@ class TimingStore:
         cur.execute("SELECT COUNT(DISTINCT nodeid) FROM test_results")
         (n,) = cur.fetchone()
         return int(n or 0)
+
+    def avg_durations(self, nodeids: Sequence[str]) -> dict[str, float]:
+        if not nodeids:
+            return {}
+
+        # Chunk to avoid SQLite parameter limits in large suites.
+        out: dict[str, float] = {}
+        cur = self._conn.cursor()
+        chunk_size = 500
+        for i in range(0, len(nodeids), chunk_size):
+            chunk = list(nodeids[i : i + chunk_size])
+            placeholders = ",".join("?" for _ in chunk)
+            cur.execute(
+                f"""
+                SELECT nodeid, AVG(duration_s) AS avg_duration_s
+                FROM test_results
+                WHERE nodeid IN ({placeholders})
+                GROUP BY nodeid
+                """,
+                tuple(chunk),
+            )
+            for nodeid, avg_d in cur.fetchall():
+                if nodeid is None:
+                    continue
+                out[str(nodeid)] = float(avg_d or 0.0)
+        return out
 
