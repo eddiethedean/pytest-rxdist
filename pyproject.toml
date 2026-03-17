@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "pytest-rxdist"
-version = "0.0.0"
+version = "0.0.1"
 description = "Rust-accelerated next-generation execution engine for pytest (planned)."
 readme = "README.md"
 requires-python = ">=3.10"
