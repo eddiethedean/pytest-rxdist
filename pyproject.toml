@@ -25,4 +25,5 @@ pytest_rxdist = "pytest_rxdist.plugin"
 [tool.maturin]
 python-source = "src"
 module-name = "pytest_rxdist._core"
+manifest-path = "rust/Cargo.toml"
 
