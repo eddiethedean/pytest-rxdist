@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import os
+import time
+from dataclasses import dataclass
+from pathlib import Path
 
 
 def pytest_addoption(parser):
@@ -26,7 +29,7 @@ def pytest_addoption(parser):
         "--rxdist-profile",
         action="store_true",
         default=False,
-        help="Enable basic runtime profiling output (placeholder).",
+        help="Enable timing persistence + summary output (Milestone 2).",
     )
     group.addoption(
         "--rxdist-debug",
@@ -38,6 +41,12 @@ def pytest_addoption(parser):
 
 def pytest_sessionstart(session):
     config = session.config
+    if _is_worker_process():
+        return
+
+    if config.getoption("--rxdist-profile"):
+        _maybe_print_timing_summary(config)
+
     if not config.getoption("--rxdist-debug"):
         return
 
@@ -93,6 +102,10 @@ def pytest_configure(config):
     # Store parsed value for later hooks.
     config._rxdist_numprocesses = n  # type: ignore[attr-defined]
 
+    if config.getoption("--rxdist-profile"):
+        config._rxdist_serial_recorder = _SerialTimingRecorder(config)  # type: ignore[attr-defined]
+        config.pluginmanager.register(config._rxdist_serial_recorder, "rxdist_serial_timing")  # type: ignore[attr-defined]
+
 
 def pytest_runtestloop(session):
     config = session.config
@@ -117,6 +130,9 @@ def pytest_runtestloop(session):
     reporter = config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(f"pytest-rxdist: ran {len(results)} tests on {n} workers")
+
+    if config.getoption("--rxdist-profile"):
+        _write_timing_run(config, results)
 
     # Reconstruct pytest reporting so terminal summary is correct.
     from _pytest.reports import TestReport
@@ -160,4 +176,94 @@ def pytest_runtestloop(session):
     session.testsfailed = failed
     # Returning True tells pytest we ran the loop ourselves.
     return True
+
+
+def pytest_sessionfinish(session, exitstatus):
+    config = session.config
+    if _is_worker_process():
+        return
+    if not config.getoption("--rxdist-profile"):
+        return
+    # Serial mode: recorder accumulates results and writes at session end.
+    recorder = getattr(config, "_rxdist_serial_recorder", None)
+    if recorder is not None:
+        recorder.write()
+
+
+@dataclass
+class _TestTiming:
+    nodeid: str
+    duration_s: float
+    outcome: str
+
+
+class _SerialTimingRecorder:
+    def __init__(self, config):
+        self._config = config
+        self._started_at = time.time()
+        self._results: list[_TestTiming] = []
+
+    def pytest_runtest_logreport(self, report):
+        if report.when != "call":
+            return
+        self._results.append(
+            _TestTiming(
+                nodeid=report.nodeid,
+                duration_s=float(getattr(report, "duration", 0.0) or 0.0),
+                outcome=str(getattr(report, "outcome", "unknown") or "unknown"),
+            )
+        )
+
+    def write(self) -> None:
+        if not self._results:
+            return
+        results = [{"nodeid": r.nodeid, "duration_s": r.duration_s, "outcome": r.outcome} for r in self._results]
+        _write_timing_run(self._config, results, started_at=self._started_at)
+
+
+def _project_root(config) -> Path:
+    try:
+        return Path(str(config.rootpath))
+    except Exception:
+        return Path.cwd()
+
+
+def _maybe_print_timing_summary(config) -> None:
+    from .timing_store import TimingStore, default_timings_path
+
+    reporter = config.pluginmanager.get_plugin("terminalreporter")
+    if reporter is None:
+        return
+
+    path = default_timings_path(_project_root(config))
+    if not path.exists():
+        return
+
+    store = TimingStore.open(path)
+    try:
+        n = store.count_tests()
+        rows = store.summary(limit=5)
+    finally:
+        store.close()
+
+    reporter.write_line(f"pytest-rxdist: timings loaded ({n} tests) from {path}")
+    for r in rows:
+        reporter.write_line(f"  slow: {r.avg_duration_s:.3f}s avg ({r.count} runs) {r.nodeid}")
+
+
+def _write_timing_run(config, results: list[dict], started_at: float | None = None) -> None:
+    from . import __version__
+    from .timing_store import TimingStore, default_timings_path, env_fingerprint
+
+    path = default_timings_path(_project_root(config))
+    store = TimingStore.open(path)
+    try:
+        store.write_run(
+            started_at=float(started_at if started_at is not None else time.time()),
+            env_fp=env_fingerprint(),
+            rxdist_version=__version__,
+            results=results,
+        )
+    finally:
+        store.close()
 

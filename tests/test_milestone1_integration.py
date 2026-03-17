@@ -15,6 +15,17 @@ def _run_pytest(args: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+def _run_pytest_env(args: list[str], env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    merged = dict(os.environ)
+    merged.update(env)
+    return subprocess.run(
+        [sys.executable, "-m", "pytest", *args],
+        capture_output=True,
+        text=True,
+        env=merged,
+    )
+
+
 def test_parallel_n2_passes():
     p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "tests/test_smoke.py"])
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
@@ -118,3 +129,30 @@ def test_workers_do_not_recurse():
     assert os.environ.get("PYTEST_RXDIST_WORKER") != "1"
     p = _run_pytest(["-p", "pytest_rxdist", "-q", "--numprocesses", "2", "tests/test_smoke.py"])
     assert p.returncode == 0, p.stdout + "\n" + p.stderr
+
+
+def test_profile_creates_sqlite_and_loads_summary_on_second_run(tmp_path):
+    db = tmp_path / "timings.sqlite3"
+    env = {"PYTEST_RXDIST_TIMINGS_PATH": str(db)}
+
+    p1 = _run_pytest_env(["-p", "pytest_rxdist", "-q", "--rxdist-profile", "tests/test_smoke.py"], env=env)
+    assert p1.returncode == 0, p1.stdout + "\n" + p1.stderr
+    assert db.exists()
+
+    p2 = _run_pytest_env(["-p", "pytest_rxdist", "-q", "--rxdist-profile", "tests/test_smoke.py"], env=env)
+    assert p2.returncode == 0, p2.stdout + "\n" + p2.stderr
+    combined = p2.stdout + "\n" + p2.stderr
+    assert "pytest-rxdist: timings loaded" in combined
+
+
+def test_profile_corruption_recovery(tmp_path):
+    db = tmp_path / "timings.sqlite3"
+    db.write_bytes(b"not a sqlite database")
+    env = {"PYTEST_RXDIST_TIMINGS_PATH": str(db)}
+
+    p = _run_pytest_env(["-p", "pytest_rxdist", "-q", "--rxdist-profile", "tests/test_smoke.py"], env=env)
+    assert p.returncode == 0, p.stdout + "\n" + p.stderr
+    assert db.exists()
+    # A rotated corrupt file should exist alongside the fresh DB.
+    rotated = list(tmp_path.glob("timings.sqlite3.corrupt.*"))
+    assert rotated

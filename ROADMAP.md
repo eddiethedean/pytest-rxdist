@@ -71,6 +71,14 @@
 
 **Outcome**: collect per-test runtime data and persist it for future scheduling.
 
+- **Progress**
+  - [x] SQLite timing store + schema (`.pytest_rxdist/timings.sqlite3` by default)
+  - [x] Record outcomes + durations in serial mode (via `pytest_runtest_logreport`)
+  - [x] Record outcomes + durations in parallel mode (from controller results)
+  - [x] Print a short summary on subsequent runs (`--rxdist-profile`)
+  - [x] Corruption recovery (rotate `.corrupt.<timestamp>` and rebuild)
+  - [x] Tests for write/read summary + corruption recovery
+
 - **Scope**
   - Record: test nodeid, duration, outcome, environment fingerprint (python version, platform, git sha optional).
   - Store: local file database (JSON/SQLite) as an implementation detail.
