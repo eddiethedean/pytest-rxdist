@@ -45,6 +45,14 @@
 
 **Outcome**: parallel execution with a worker pool, producing correct pytest results with minimal features.
 
+- **Progress**
+  - [x] Implement `--numprocesses` with `auto` worker count selection
+  - [x] Spawn-per-run Python worker pool (subprocess workers)
+  - [x] Baseline scheduler: shared work queue (load-based)
+  - [x] MessagePack IPC (framed messages)
+  - [x] Best-effort pytest reporting (correct exit code + nodeid attribution)
+  - [x] Integration tests covering `--numprocesses 2`, `auto`, and failure attribution
+
 - **Scope**
   - Worker processes (Python) executing tests.
   - A simple scheduler strategy: **round-robin** or **load-based** baseline.

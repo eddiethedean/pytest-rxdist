@@ -6,7 +6,7 @@ The Python package name is **`pytest-rxdist`** (import as `pytest_rxdist`).
 
 ## Status
 
-Milestone 0 is implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**. Test execution is still **serial** (parallelism comes in Milestone 1).
+Milestone 0–1 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, and an MVP parallel runner.
 
 Published on PyPI as `pytest-rxdist` (currently an early, experimental build).
 
@@ -29,12 +29,19 @@ From source (editable):
 python -m pip install -e .
 ```
 
-## Usage (Milestone 0)
+## Usage (Milestone 1)
 
 Run normally (plugin is available via `pytest11` entrypoint), or force-load it:
 
 ```bash
 pytest -p pytest_rxdist
+```
+
+Run in parallel (MVP):
+
+```bash
+pytest -p pytest_rxdist --numprocesses 4
+pytest -p pytest_rxdist --numprocesses auto
 ```
 
 Enable minimal debug output (reports whether the Rust extension loaded):
@@ -50,6 +57,12 @@ pytest -p pytest_rxdist --rxdist-debug
 - **Faster IPC**: move beyond Python pickle toward binary / zero-copy options
 - **Worker reuse**: “warm” workers with cached imports (and carefully controlled caching)
 - **Scales up**: from laptop parallelism to multi-machine distributed execution
+
+## Current limitations
+
+- Worker execution is conservative: each test is executed via a subprocess `python -m pytest <nodeid>`.
+- CLI compatibility is not complete yet: this MVP uses `--numprocesses` (not `-n`).
+- Scheduling is baseline (shared work queue); smarter strategies come later.
 
 ## Planned CLI (future)
 
