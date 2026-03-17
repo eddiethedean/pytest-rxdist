@@ -5,6 +5,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+import importlib.util
 
 
 def _run_pytest(args: list[str], *, env: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
@@ -143,6 +144,17 @@ def test_profile_perf_sanity_not_extreme_overhead(tmp_path: Path):
 
     # Allow a lot of slack for first-time sqlite init, CI noise, etc.
     assert t_prof < max(2.0, t_no * 5.0), f"profiling too slow: no={t_no:.3f}s prof={t_prof:.3f}s"
+
+
+def test_pytest_cov_smoke_if_installed(tmp_path: Path):
+    if importlib.util.find_spec("pytest_cov") is None:
+        return
+
+    # Smoke: ensure we can run under pytest-cov without crashing.
+    p = _run_pytest(
+        ["-p", "pytest_rxdist", "-q", "--cov=pytest_rxdist", "--cov-report=term-missing:skip-covered", "tests/test_smoke.py"]
+    )
+    assert p.returncode == 0, p.stdout + "\n" + p.stderr
 
 
 def test_smart_scheduler_uses_timings_and_reports_stats(tmp_path: Path):

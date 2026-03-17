@@ -65,6 +65,32 @@ class RXDistController:
         for w in workers:
             wait_hello(w)
 
+        def record_worker_failure(nodeid: str, why: str) -> None:
+            with results_lock:
+                results.append(
+                    {
+                        "nodeid": nodeid,
+                        "outcome": "failed",
+                        "duration_s": 0.0,
+                        "returncode": 1,
+                        "stdout": "",
+                        "stderr": why,
+                    }
+                )
+
+        def wait_result_for_nodeid(w: WorkerProcess, nodeid: str) -> bool:
+            """Return True if result received, False if worker died/EOF."""
+            assert w.proc.stdout is not None
+            try:
+                for msg in iter_messages(w.proc.stdout):
+                    if msg.type == "result" and msg.payload.get("nodeid") == nodeid:
+                        with results_lock:
+                            results.append(msg.payload)
+                        return True
+            except Exception:
+                return False
+            return False
+
         if self.scheduler == "smart":
             # Build a predictive schedule using historical timings.
             timings_path = default_timings_path(Path.cwd())
@@ -84,11 +110,13 @@ class RXDistController:
                 assert w.proc.stdout is not None
                 for nodeid in queue_nodeids:
                     send_message(w.proc.stdin, "run", {"nodeid": nodeid})
-                    for msg in iter_messages(w.proc.stdout):
-                        if msg.type == "result" and msg.payload.get("nodeid") == nodeid:
-                            with results_lock:
-                                results.append(msg.payload)
-                            break
+                    ok = wait_result_for_nodeid(w, nodeid)
+                    if not ok:
+                        record_worker_failure(nodeid, "worker died before reporting result")
+                        # Mark remaining assigned work as failed as well.
+                        for remaining in queue_nodeids[queue_nodeids.index(nodeid) + 1 :]:
+                            record_worker_failure(remaining, "worker died before running test")
+                        break
                 send_message(w.proc.stdin, "shutdown", {})
 
             threads = [
@@ -116,12 +144,17 @@ class RXDistController:
                         return
 
                     send_message(w.proc.stdin, "run", {"nodeid": nodeid})
-
-                    for msg in iter_messages(w.proc.stdout):
-                        if msg.type == "result" and msg.payload.get("nodeid") == nodeid:
-                            with results_lock:
-                                results.append(msg.payload)
-                            break
+                    ok = wait_result_for_nodeid(w, nodeid)
+                    if not ok:
+                        record_worker_failure(nodeid, "worker died before reporting result")
+                        # Drain remaining queue as failures to avoid hang.
+                        while True:
+                            try:
+                                remaining = work_q.get_nowait()
+                            except queue.Empty:
+                                break
+                            record_worker_failure(remaining, "worker died before running test")
+                        return
 
             threads = [threading.Thread(target=worker_thread, args=(w,), daemon=True) for w in workers]
 
