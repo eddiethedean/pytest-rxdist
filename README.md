@@ -75,6 +75,17 @@ pytest -p pytest_rxdist --rxdist-debug
 - `--rxdist-ipc shm`: store large stdout/stderr payloads in shared memory and pass references over IPC.
 - `--rxdist-ipc-batch-size N`: send/receive batches of nodeids/results to reduce IPC overhead (default 1).
 
+## Fixture-aware grouping (Milestone 6)
+
+- `--rxdist-fixture-grouping off` (default): no fixture grouping.
+- `--rxdist-fixture-grouping session`: best-effort grouping for tests that share **session-scoped** fixtures; cohorts are scheduled as units to reduce redundant expensive setup.
+- `--rxdist-fixture-grouping-max-cohort-size N`: cap cohort chunk size (default 50) as an escape hatch.
+
+Limitations:
+
+- Currently only considers **session-scoped** fixtures.
+- Grouping is best-effort; tests with missing/unknown fixture metadata run ungrouped.
+
 ## What it aims to improve (vs `pytest-xdist`)
 
 - **Scheduling efficiency**: predictive scheduling using historical runtimes to reduce idle workers

@@ -53,6 +53,20 @@ def pytest_addoption(parser):
         help="IPC batch size (number of nodeids per message). Default: 1. (Milestone 5)",
     )
     group.addoption(
+        "--rxdist-fixture-grouping",
+        action="store",
+        default="off",
+        choices=["off", "session"],
+        help="Fixture-aware grouping strategy (off|session). Default: off. (Milestone 6)",
+    )
+    group.addoption(
+        "--rxdist-fixture-grouping-max-cohort-size",
+        action="store",
+        default="50",
+        metavar="N",
+        help="Max tests per fixture cohort chunk. Default: 50. (Milestone 6)",
+    )
+    group.addoption(
         "--rxdist-debug",
         action="store_true",
         default=False,
@@ -133,6 +147,17 @@ def pytest_configure(config):
         batch_size = 1
     os.environ["PYTEST_RXDIST_IPC_BATCH_SIZE"] = str(batch_size)
 
+    # Fixture grouping (Milestone 6).
+    grouping = (config.getoption("rxdist_fixture_grouping") or "off").strip().lower()
+    if grouping not in ("off", "session"):
+        grouping = "off"
+    try:
+        max_cohort_size = max(1, int(config.getoption("rxdist_fixture_grouping_max_cohort_size") or 50))
+    except Exception:
+        max_cohort_size = 50
+    config._rxdist_fixture_grouping = grouping  # type: ignore[attr-defined]
+    config._rxdist_fixture_grouping_max_cohort_size = max_cohort_size  # type: ignore[attr-defined]
+
     if config.getoption("--rxdist-profile"):
         config._rxdist_serial_recorder = _SerialTimingRecorder(config)  # type: ignore[attr-defined]
         config.pluginmanager.register(config._rxdist_serial_recorder, "rxdist_serial_timing")  # type: ignore[attr-defined]
@@ -151,17 +176,34 @@ def pytest_runtestloop(session):
 
     items_by_nodeid = {item.nodeid: item for item in session.items}
     nodeids = list(items_by_nodeid.keys())
+
+    grouping = getattr(config, "_rxdist_fixture_grouping", "off")
+    max_cohort_size = int(getattr(config, "_rxdist_fixture_grouping_max_cohort_size", 50))
+    units: list[list[str]] | None = None
+    grouping_stats = None
+    if grouping == "session":
+        from .fixture_grouping import build_session_fixture_units, stats_for_units
+
+        units = build_session_fixture_units(session.items, max_cohort_size=max_cohort_size)
+        grouping_stats = stats_for_units(units, max_cohort_size=max_cohort_size)
     controller = RXDistController(
         num_workers=n,
         scheduler=config.getoption("rxdist_scheduler"),
         reuse_mode=config.getoption("rxdist_reuse"),
         debug=bool(config.getoption("--rxdist-debug")),
     )
-    results = controller.run(nodeids)
+    results = controller.run(nodeids, units=units)
 
     reporter = config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(f"pytest-rxdist: ran {len(results)} tests on {n} workers")
+
+    if config.getoption("--rxdist-debug") and reporter is not None and grouping_stats is not None:
+        reporter.write_line(
+            "pytest-rxdist: fixture_grouping=session "
+            f"cohorts={grouping_stats.cohorts} grouped={grouping_stats.grouped_tests} "
+            f"ungrouped={grouping_stats.ungrouped_tests} max_cohort_size={grouping_stats.max_cohort_size}"
+        )
 
     if config.getoption("--rxdist-debug") and reporter is not None:
         ipc = config.getoption("rxdist_ipc")

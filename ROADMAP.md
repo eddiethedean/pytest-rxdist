@@ -157,6 +157,12 @@
 
 **Outcome**: reduce redundant setup by colocating tests that share expensive fixtures.
 
+- **Progress**
+  - [x] Add opt-in CLI flags (`--rxdist-fixture-grouping`, `--rxdist-fixture-grouping-max-cohort-size`)
+  - [x] Derive session-scoped fixture cohorts from collection (best-effort)
+  - [x] Schedule cohorts as atomic units (baseline + smart)
+  - [x] Debug output + tests (unit + integration)
+
 - **Scope**
   - Derive fixture usage graph from collection phase (best-effort).
   - Group tests into “fixture cohorts” and schedule cohorts as units.

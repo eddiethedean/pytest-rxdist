@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .ipc import iter_messages, send_message
-from .scheduler import SmartSchedule, smart_schedule
+from .scheduler import SmartSchedule, smart_schedule, smart_schedule_units
 from .timing_store import TimingStore, default_timings_path
 from .shm import ShmTextRef, cleanup_shm, read_text_from_shm
 
@@ -61,12 +61,20 @@ class RXDistController:
         assert proc.stdout is not None
         return WorkerProcess(proc=proc, idx=idx)
 
-    def run(self, nodeids: list[str]) -> list[dict[str, Any]]:
+    def run(self, nodeids: list[str], *, units: list[list[str]] | None = None) -> list[dict[str, Any]]:
         if not nodeids:
             return []
 
         results: list[dict[str, Any]] = []
         results_lock = threading.Lock()
+
+        if units is not None:
+            # Use units as the source-of-truth ordering, but keep nodeids for reporting.
+            flat: list[str] = []
+            for u in units:
+                for nid in u:
+                    flat.append(str(nid))
+            nodeids = flat
 
         workers = [self._spawn_worker(i) for i in range(self.num_workers)]
 
@@ -201,7 +209,10 @@ class RXDistController:
                 finally:
                     store.close()
 
-            schedule = smart_schedule(nodeids, num_workers=self.num_workers, avg_durations_s=avg)
+            if units is not None:
+                schedule = smart_schedule_units(units, num_workers=self.num_workers, avg_durations_s=avg)
+            else:
+                schedule = smart_schedule(nodeids, num_workers=self.num_workers, avg_durations_s=avg)
             self.last_schedule = schedule
 
             def run_worker_queue(w: WorkerProcess, queue_nodeids: list[str]) -> None:
@@ -261,9 +272,13 @@ class RXDistController:
             ]
         else:
             # Baseline load-based via a shared work queue.
-            work_q: queue.Queue[str] = queue.Queue()
-            for nid in nodeids:
-                work_q.put(nid)
+            work_q: queue.Queue[list[str]] = queue.Queue()
+            if units is not None:
+                for u in units:
+                    work_q.put([str(x) for x in u])
+            else:
+                for nid in nodeids:
+                    work_q.put([str(nid)])
 
             def worker_thread(w: WorkerProcess) -> None:
                 w_local = w
@@ -271,64 +286,74 @@ class RXDistController:
                 assert w_local.proc.stdout is not None
                 respawned = False
                 while True:
-                    batch: list[str] = []
-                    for _ in range(max(1, self.ipc_batch_size)):
-                        try:
-                            batch.append(work_q.get_nowait())
-                        except queue.Empty:
-                            break
-                    if not batch:
+                    try:
+                        unit = work_q.get_nowait()
+                    except queue.Empty:
                         send_message(w_local.proc.stdin, "shutdown", {})
                         return
 
-                    if len(batch) == 1:
-                        try:
-                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
-                        except Exception:
-                            record_worker_failure(batch[0], "worker died before receiving work")
-                            while True:
-                                try:
-                                    remaining = work_q.get_nowait()
-                                except queue.Empty:
-                                    break
-                                record_worker_failure(remaining, "worker died before running test")
-                            return
-                    else:
-                        try:
-                            send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
-                        except Exception:
-                            record_worker_failure(batch[0], "worker died before receiving work")
-                            while True:
-                                try:
-                                    remaining = work_q.get_nowait()
-                                except queue.Empty:
-                                    break
-                                record_worker_failure(remaining, "worker died before running test")
-                            return
-
-                    ok = wait_one_or_batch_results(w_local, batch)
-                    if not ok:
-                        if self.reuse_mode == "safe" and not respawned:
-                            respawned = True
-                            w_local = respawn_worker(w_local)
-                            assert w_local.proc.stdin is not None
-                            assert w_local.proc.stdout is not None
+                    i = 0
+                    while i < len(unit):
+                        batch = unit[i : i + max(1, self.ipc_batch_size)]
+                        if len(batch) == 1:
                             try:
                                 send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
                             except Exception:
-                                ok2 = False
-                            else:
-                                ok2 = wait_one_or_batch_results(w_local, [batch[0]])
-                            if ok2:
-                                continue
-                        record_worker_failure(batch[0], "worker died before reporting result")
-                        while True:
+                                record_worker_failure(batch[0], "worker died before receiving work")
+                                while True:
+                                    try:
+                                        remaining_unit = work_q.get_nowait()
+                                    except queue.Empty:
+                                        break
+                                    for remaining in remaining_unit:
+                                        record_worker_failure(remaining, "worker died before running test")
+                                for remaining in unit[i + 1 :]:
+                                    record_worker_failure(remaining, "worker died before running test")
+                                return
+                        else:
                             try:
-                                remaining = work_q.get_nowait()
-                            except queue.Empty:
-                                break
-                            record_worker_failure(remaining, "worker died before running test")
-                        return
+                                send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+                            except Exception:
+                                record_worker_failure(batch[0], "worker died before receiving work")
+                                while True:
+                                    try:
+                                        remaining_unit = work_q.get_nowait()
+                                    except queue.Empty:
+                                        break
+                                    for remaining in remaining_unit:
+                                        record_worker_failure(remaining, "worker died before running test")
+                                for remaining in unit[i + 1 :]:
+                                    record_worker_failure(remaining, "worker died before running test")
+                                return
+
+                        ok = wait_one_or_batch_results(w_local, batch)
+                        if not ok:
+                            if self.reuse_mode == "safe" and not respawned:
+                                respawned = True
+                                w_local = respawn_worker(w_local)
+                                assert w_local.proc.stdin is not None
+                                assert w_local.proc.stdout is not None
+                                try:
+                                    send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                                except Exception:
+                                    ok2 = False
+                                else:
+                                    ok2 = wait_one_or_batch_results(w_local, [batch[0]])
+                                if ok2:
+                                    i += 1
+                                    continue
+                            record_worker_failure(batch[0], "worker died before reporting result")
+                            while True:
+                                try:
+                                    remaining_unit = work_q.get_nowait()
+                                except queue.Empty:
+                                    break
+                                for remaining in remaining_unit:
+                                    record_worker_failure(remaining, "worker died before running test")
+                            for remaining in unit[i + 1 :]:
+                                record_worker_failure(remaining, "worker died before running test")
+                            return
+                        i += len(batch)
 
             threads = [threading.Thread(target=worker_thread, args=(w,), daemon=True) for w in workers]
 
