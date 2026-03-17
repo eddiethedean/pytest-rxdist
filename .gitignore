@@ -1,0 +1,65 @@
+# --- Project-specific ---
+planning/
+
+# --- Python bytecode / caches ---
+__pycache__/
+*.py[cod]
+*$py.class
+
+# --- Distribution / packaging ---
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+wheels/
+pip-wheel-metadata/
+
+# --- Virtual environments ---
+.venv/
+venv/
+ENV/
+env/
+.env/
+
+# --- Test / tooling caches ---
+.pytest_cache/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+nosetests.xml
+
+# --- Type checking / linting ---
+.mypy_cache/
+.pytype/
+.pyre/
+.ruff_cache/
+
+# --- Docs / site outputs ---
+site/
+.doctrees/
+
+# --- Jupyter / IPython ---
+.ipynb_checkpoints/
+.python-version
+ipython_config.py
+
+# --- OS / editor / IDE ---
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+
+# Cursor local state (keep code, ignore local agent/cache/state)
+.cursor/*
+!.cursor/rules/
+!.cursor/rules/**
+!.cursor/README*
+
+# --- Logs ---
+*.log

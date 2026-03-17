@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling>=1.24"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pytest-rxdist"
+version = "0.0.0"
+description = "Rust-accelerated next-generation execution engine for pytest (planned)."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "RXDist contributors" }]
+license = { text = "MIT" }
+keywords = ["pytest", "xdist", "parallel", "rust"]
+classifiers = [
+  "Development Status :: 1 - Planning",
+  "Framework :: Pytest",
+  "Programming Language :: Python",
+  "Programming Language :: Rust",
+]
+dependencies = []
+
+[project.entry-points.pytest11]
+pytest_rxdist = "pytest_rxdist.plugin"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pytest_rxdist"]
+

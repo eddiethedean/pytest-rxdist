@@ -1,0 +1,162 @@
+# rxdist Roadmap (Build Plan)
+
+## Goals and constraints
+
+- **Goal**: a drop-in replacement for `pytest-xdist` with a Rust-powered execution core, smarter scheduling, faster IPC, and optional distributed execution.
+- **Constraints**: preserve pytest plugin compatibility, keep configuration minimal, and make performance wins measurable.
+
+## High-level architecture (target)
+
+- **Python layer (plugin/package)**
+  - Registers pytest hooks, CLI options, and integrates with `pytest -n ...` workflows.
+  - Translates pytest “collection + execution events” into messages for the core.
+- **Rust core (engine)**
+  - Worker pool manager, scheduler(s), IPC transport, profiling/timing store.
+- **Bridge**
+  - PyO3 bindings (initially), with an eye toward minimizing cross-language call frequency.
+
+## Milestones
+
+### Milestone 0 — Project skeleton + compatibility baseline
+
+**Outcome**: a repo that builds a Python package with a minimal pytest plugin, and a Rust library wired via PyO3/maturin.
+
+- **Deliverables**
+  - Python package `pytest-rxdist` (import `pytest_rxdist`) with `pytest11` entrypoint (plugin auto-loadable).
+  - Rust crate for the core engine with a thin PyO3 surface area.
+  - A tiny example test suite in-repo to validate local runs.
+- **Definition of done**
+  - `pip install -e .` (or equivalent) works locally.
+  - `pytest -p pytest_rxdist` loads the plugin without errors and runs tests serially (no parallelism yet).
+
+---
+
+### Milestone 1 — MVP: basic parallel runner (xdist replacement shape)
+
+**Outcome**: parallel execution with a worker pool, producing correct pytest results with minimal features.
+
+- **Scope**
+  - Worker processes (Python) executing tests.
+  - A simple scheduler strategy: **round-robin** or **load-based** baseline.
+  - Basic result reporting back to pytest (pass/fail/skip/xfail, captured output where feasible).
+- **Key decisions**
+  - Start with a conservative IPC format (e.g., MessagePack) before attempting zero-copy.
+  - Keep worker lifecycle simple (spawn per run) in MVP; reuse comes later.
+- **Definition of done**
+  - `pytest -p rxdist -n auto` runs tests in parallel and exits with correct status code.
+  - Failures and tracebacks are attributable to the right test IDs.
+  - No significant plugin breakage for common hooks (best-effort parity with xdist basics).
+
+---
+
+### Milestone 2 — Profiling + timing data foundation
+
+**Outcome**: collect per-test runtime data and persist it for future scheduling.
+
+- **Scope**
+  - Record: test nodeid, duration, outcome, environment fingerprint (python version, platform, git sha optional).
+  - Store: local file database (JSON/SQLite) as an implementation detail.
+  - CLI: `--rxdist-profile=on` (or `--rxdist-profile`) to enable/force writing.
+- **Definition of done**
+  - After one run, a second run can read timing data and print a short summary.
+  - Data corruption is handled safely (ignore + rebuild).
+
+---
+
+### Milestone 3 — Smart scheduler (predictive / historical)
+
+**Outcome**: reduce idle time and improve makespan using timing history.
+
+- **Scope**
+  - Scheduling strategies:
+    - **Predictive**: greedy bin-packing by historical duration (Longest Processing Time first).
+    - Fallback to load-based when timings missing.
+  - CLI: `--rxdist-scheduler=smart` (or `--rxdist-mode=smart`) to select strategy.
+- **Definition of done**
+  - On an imbalanced suite, smart scheduling shows reduced idle worker time vs baseline.
+  - Scheduler remains correct when timings are absent/partial.
+
+---
+
+### Milestone 4 — Worker reuse (warm pool)
+
+**Outcome**: reduce overhead from process startup, imports, and repeated initialization.
+
+- **Scope**
+  - Persistent workers within a single pytest invocation (and optionally across runs later).
+  - Cache imports; optionally cache selected fixture setup (only if it is safe/opt-in).
+  - Robust cleanup between tests to avoid cross-test contamination.
+- **Definition of done**
+  - Measurable speedup on suites with heavy imports/initialization.
+  - A “safe mode” exists that disables risky caching features.
+
+---
+
+### Milestone 5 — Faster IPC (binary / optional shared memory)
+
+**Outcome**: reduce serialization overhead and cross-process data movement.
+
+- **Scope**
+  - Replace/augment initial IPC with one of:
+    - MessagePack (baseline) → Cap’n Proto (schema’d) (example path), or
+    - Arrow for structured data, optionally shared memory for payloads.
+  - Minimize Python↔Rust roundtrips (batch messages).
+- **Definition of done**
+  - Benchmarks show reduced overhead on chatty workloads (many small tests, lots of reporting).
+  - IPC layer is pluggable/feature-flagged.
+
+---
+
+### Milestone 6 — Fixture-aware grouping (optional, high leverage)
+
+**Outcome**: reduce redundant setup by colocating tests that share expensive fixtures.
+
+- **Scope**
+  - Derive fixture usage graph from collection phase (best-effort).
+  - Group tests into “fixture cohorts” and schedule cohorts as units.
+  - Provide escape hatches (disable grouping; cap cohort sizes).
+- **Definition of done**
+  - On fixture-heavy suites, reduces total setup time without breaking isolation assumptions.
+
+---
+
+### Milestone 7 — Distributed execution (multi-machine)
+
+**Outcome**: run workers across multiple machines with minimal user friction.
+
+- **Scope**
+  - Coordinator + remote worker agents.
+  - Transport: start with TCP + authenticated handshake; later consider gRPC/QUIC.
+  - Fault tolerance: worker dropouts, retries, and clear error reporting.
+- **Definition of done**
+  - A simple two-machine demo works reliably on a LAN.
+  - Failures are diagnosable (logs + coordinator summary).
+
+---
+
+### Milestone 8 — UX, analytics, and hardening
+
+**Outcome**: make it production-friendly and easy to adopt.
+
+- **Scope**
+  - Better CLI help and docs.
+  - Reporting: per-worker utilization, critical path, slowest tests, scheduler stats.
+  - Compatibility testing against popular pytest plugins (best-effort matrix).
+- **Definition of done**
+  - A “getting started” path works for a new project in minutes.
+  - Clear success metrics: 2–5× over `pytest-xdist` on at least one real-ish benchmark suite.
+
+## Suggested repo layout (when you start implementing)
+
+- `python/rxdist/` — pytest plugin + Python-side worker code
+- `rust/` — Rust core engine crate(s)
+- `tests/` — integration tests / example suites
+- `docs/` — design notes and benchmarks
+
+## Risk register (to manage early)
+
+- **Pytest internals**: rely on stable hooks; avoid depending on private APIs where possible.
+- **Plugin compatibility**: start conservative; document known incompatibilities; add a compatibility test suite.
+- **Debuggability**: invest early in logs (coordinator + worker) and stable IDs for messages/tests.
+- **Cross-language complexity**: keep the PyO3 surface minimal and message-driven.
+
