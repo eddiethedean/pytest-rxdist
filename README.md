@@ -6,7 +6,7 @@ The Python package name is **`pytest-rxdist`** (import as `pytest_rxdist`).
 
 ## Status
 
-Milestone 0–4 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, a timing-informed smart scheduler, and warm worker reuse.
+Milestone 0–5 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, a timing-informed smart scheduler, warm worker reuse, and optional shared-memory IPC for large payloads.
 
 Published on PyPI as `pytest-rxdist` (currently an early, experimental build).
 
@@ -68,6 +68,12 @@ Enable minimal debug output (reports whether the Rust extension loaded):
 ```bash
 pytest -p pytest_rxdist --rxdist-debug
 ```
+
+## IPC options (Milestone 5)
+
+- `--rxdist-ipc baseline` (default): inline stdout/stderr in IPC messages.
+- `--rxdist-ipc shm`: store large stdout/stderr payloads in shared memory and pass references over IPC.
+- `--rxdist-ipc-batch-size N`: send/receive batches of nodeids/results to reduce IPC overhead (default 1).
 
 ## What it aims to improve (vs `pytest-xdist`)
 

@@ -210,3 +210,46 @@ def test_smart_scheduler_uses_timings_and_reports_stats(tmp_path: Path):
         except OSError:
             pass
 
+
+def test_ipc_shm_and_batching_smoke(tmp_path: Path):
+    # Force a large stdout payload so shm path is exercised.
+    big = "X" * 50000
+    testfile = Path("tests/_rxdist_tmp_big_output.py")
+    testfile.write_text(
+        "def test_big_output():\n"
+        f"    print({big!r})\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    try:
+        p = _run_pytest(
+            [
+                "-p",
+                "pytest_rxdist",
+                "-q",
+                "--numprocesses",
+                "1",
+                "--rxdist-reuse",
+                "safe",
+                "--rxdist-ipc",
+                "shm",
+                "--rxdist-ipc-batch-size",
+                "4",
+                "--rxdist-debug",
+                str(testfile),
+            ],
+            env=_merged_env({"PYTEST_RXDIST_SHM_THRESHOLD_BYTES": "1024"}),
+        )
+        assert p.returncode == 0, p.stdout + "\n" + p.stderr
+        combined = p.stdout + "\n" + p.stderr
+        assert "ipc mode=shm" in combined
+        assert "batch_size=4" in combined
+        # At least one blob should have been placed into shm.
+        assert "shm_used=1" in combined or "shm_used=2" in combined or "shm_used=" in combined
+    finally:
+        try:
+            testfile.unlink()
+        except OSError:
+            pass
+

@@ -135,6 +135,13 @@
 
 **Outcome**: reduce serialization overhead and cross-process data movement.
 
+- **Progress**
+  - [x] Shared memory blob support for large stdout/stderr payloads (`--rxdist-ipc shm`)
+  - [x] Batch run/results support (`--rxdist-ipc-batch-size`)
+  - [x] Controller decode + cleanup (unlink shared memory after read)
+  - [x] CLI feature flags (baseline vs shm + batch size)
+  - [x] Tests for shm path + batching smoke
+
 - **Scope**
   - Replace/augment initial IPC with one of:
     - MessagePack (baseline) → Cap’n Proto (schema’d) (example path), or

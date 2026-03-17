@@ -39,6 +39,20 @@ def pytest_addoption(parser):
         help="Worker reuse mode (off|safe|aggressive). Default: safe. (Milestone 4)",
     )
     group.addoption(
+        "--rxdist-ipc",
+        action="store",
+        default="baseline",
+        choices=["baseline", "shm"],
+        help="IPC transport mode (baseline|shm). Default: baseline. (Milestone 5)",
+    )
+    group.addoption(
+        "--rxdist-ipc-batch-size",
+        action="store",
+        default="1",
+        metavar="N",
+        help="IPC batch size (number of nodeids per message). Default: 1. (Milestone 5)",
+    )
+    group.addoption(
         "--rxdist-debug",
         action="store_true",
         default=False,
@@ -109,6 +123,16 @@ def pytest_configure(config):
     # Store parsed value for later hooks.
     config._rxdist_numprocesses = n  # type: ignore[attr-defined]
 
+    # IPC flags are read by controller/worker via env vars (controller uses Path.cwd()).
+    ipc = config.getoption("rxdist_ipc")
+    batch_raw = config.getoption("rxdist_ipc_batch_size")
+    os.environ["PYTEST_RXDIST_IPC"] = str(ipc)
+    try:
+        batch_size = max(1, int(batch_raw))
+    except Exception:
+        batch_size = 1
+    os.environ["PYTEST_RXDIST_IPC_BATCH_SIZE"] = str(batch_size)
+
     if config.getoption("--rxdist-profile"):
         config._rxdist_serial_recorder = _SerialTimingRecorder(config)  # type: ignore[attr-defined]
         config.pluginmanager.register(config._rxdist_serial_recorder, "rxdist_serial_timing")  # type: ignore[attr-defined]
@@ -138,6 +162,20 @@ def pytest_runtestloop(session):
     reporter = config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
         reporter.write_line(f"pytest-rxdist: ran {len(results)} tests on {n} workers")
+
+    if config.getoption("--rxdist-debug") and reporter is not None:
+        ipc = config.getoption("rxdist_ipc")
+        batch_raw = config.getoption("rxdist_ipc_batch_size")
+        try:
+            batch_size = int(batch_raw)
+        except Exception:
+            batch_size = 1
+        if ipc == "shm":
+            shm_used = sum(int(r.get("_ipc_shm_used") or 0) for r in results)
+            inline_used = sum(int(r.get("_ipc_inline_used") or 0) for r in results)
+            reporter.write_line(
+                f"pytest-rxdist: ipc mode=shm batch_size={batch_size} shm_used={shm_used} inline_used={inline_used}"
+            )
 
     if config.getoption("--rxdist-debug") and reporter is not None:
         sched = config.getoption("rxdist_scheduler")

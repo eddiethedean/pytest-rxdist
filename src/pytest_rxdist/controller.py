@@ -12,6 +12,7 @@ from typing import Any
 from .ipc import iter_messages, send_message
 from .scheduler import SmartSchedule, smart_schedule
 from .timing_store import TimingStore, default_timings_path
+from .shm import ShmTextRef, cleanup_shm, read_text_from_shm
 
 
 @dataclass
@@ -36,10 +37,17 @@ class RXDistController:
 
         self.last_schedule: SmartSchedule | None = None
 
+        self.ipc_mode = (os.environ.get("PYTEST_RXDIST_IPC") or "baseline").strip().lower()
+        try:
+            self.ipc_batch_size = int(os.environ.get("PYTEST_RXDIST_IPC_BATCH_SIZE") or 1)
+        except Exception:
+            self.ipc_batch_size = 1
+
     def _spawn_worker(self, idx: int) -> WorkerProcess:
         env = dict(os.environ)
         env["PYTEST_RXDIST_WORKER"] = "1"
         env["PYTEST_RXDIST_REUSE"] = self.reuse_mode
+        env["PYTEST_RXDIST_IPC"] = self.ipc_mode
         cmd = [sys.executable, "-m", "pytest_rxdist._worker_main"]
         proc = subprocess.Popen(
             cmd,
@@ -94,8 +102,79 @@ class RXDistController:
                 for msg in iter_messages(w.proc.stdout):
                     if msg.type == "result" and msg.payload.get("nodeid") == nodeid:
                         with results_lock:
-                            results.append(msg.payload)
+                            results.append(decode_result_payload(msg.payload))
                         return True
+            except Exception:
+                return False
+            return False
+
+        def decode_result_payload(payload: dict[str, Any]) -> dict[str, Any]:
+            if self.ipc_mode != "shm":
+                return payload
+            out = dict(payload)
+            shm_used = 0
+            inline_used = 0
+            for key in ("stdout_blob", "stderr_blob"):
+                blob = out.get(key)
+                if not isinstance(blob, dict):
+                    continue
+                kind = blob.get("kind")
+                if kind == "inline":
+                    inline_used += 1
+                    text = blob.get("text") or ""
+                elif kind == "shm":
+                    shm_used += 1
+                    ref = ShmTextRef(
+                        kind="shm",
+                        name=str(blob.get("name")),
+                        size=int(blob.get("size") or 0),
+                        encoding=str(blob.get("encoding") or "utf-8"),
+                    )
+                    try:
+                        text = read_text_from_shm(ref)
+                    finally:
+                        cleanup_shm(ref)
+                else:
+                    text = ""
+
+                if key == "stdout_blob":
+                    out["stdout"] = text
+                else:
+                    out["stderr"] = text
+
+            out["_ipc_shm_used"] = shm_used
+            out["_ipc_inline_used"] = inline_used
+            return out
+
+        def wait_one_or_batch_results(w: WorkerProcess, expected_nodeids: list[str]) -> bool:
+            """Wait for result(s) for nodeids. Returns False on EOF/death."""
+            assert w.proc.stdout is not None
+            want = set(expected_nodeids)
+            try:
+                for msg in iter_messages(w.proc.stdout):
+                    if msg.type == "result":
+                        nid = msg.payload.get("nodeid")
+                        if nid in want:
+                            payload = decode_result_payload(msg.payload)
+                            with results_lock:
+                                results.append(payload)
+                            want.remove(nid)
+                            if not want:
+                                return True
+                    if msg.type == "results_batch":
+                        rs = msg.payload.get("results") or []
+                        if isinstance(rs, list):
+                            for r in rs:
+                                if not isinstance(r, dict):
+                                    continue
+                                nid = r.get("nodeid")
+                                if nid in want:
+                                    payload = decode_result_payload(r)
+                                    with results_lock:
+                                        results.append(payload)
+                                    want.remove(nid)
+                            if not want:
+                                return True
             except Exception:
                 return False
             return False
@@ -130,23 +209,32 @@ class RXDistController:
                 assert w_local.proc.stdin is not None
                 assert w_local.proc.stdout is not None
                 respawned = False
-                for nodeid in queue_nodeids:
-                    send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
-                    ok = wait_result_for_nodeid(w_local, nodeid)
+                i = 0
+                while i < len(queue_nodeids):
+                    batch = queue_nodeids[i : i + max(1, self.ipc_batch_size)]
+                    if len(batch) == 1:
+                        send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                    else:
+                        send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+
+                    ok = wait_one_or_batch_results(w_local, batch)
                     if not ok:
                         if self.reuse_mode == "safe" and not respawned:
                             respawned = True
                             w_local = respawn_worker(w_local)
                             assert w_local.proc.stdin is not None
                             assert w_local.proc.stdout is not None
-                            send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
-                            ok2 = wait_result_for_nodeid(w_local, nodeid)
+                            # Retry current batch as single nodeid (simpler).
+                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                            ok2 = wait_one_or_batch_results(w_local, [batch[0]])
                             if ok2:
+                                i += 1
                                 continue
-                        record_worker_failure(nodeid, "worker died before reporting result")
-                        for remaining in queue_nodeids[queue_nodeids.index(nodeid) + 1 :]:
+                        record_worker_failure(batch[0], "worker died before reporting result")
+                        for remaining in queue_nodeids[i + 1 :]:
                             record_worker_failure(remaining, "worker died before running test")
                         break
+                    i += len(batch)
                 if w_local.proc.stdin is not None:
                     send_message(w_local.proc.stdin, "shutdown", {})
 
@@ -170,25 +258,33 @@ class RXDistController:
                 assert w_local.proc.stdout is not None
                 respawned = False
                 while True:
-                    try:
-                        nodeid = work_q.get_nowait()
-                    except queue.Empty:
+                    batch: list[str] = []
+                    for _ in range(max(1, self.ipc_batch_size)):
+                        try:
+                            batch.append(work_q.get_nowait())
+                        except queue.Empty:
+                            break
+                    if not batch:
                         send_message(w_local.proc.stdin, "shutdown", {})
                         return
 
-                    send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
-                    ok = wait_result_for_nodeid(w_local, nodeid)
+                    if len(batch) == 1:
+                        send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                    else:
+                        send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+
+                    ok = wait_one_or_batch_results(w_local, batch)
                     if not ok:
                         if self.reuse_mode == "safe" and not respawned:
                             respawned = True
                             w_local = respawn_worker(w_local)
                             assert w_local.proc.stdin is not None
                             assert w_local.proc.stdout is not None
-                            send_message(w_local.proc.stdin, "run", {"nodeid": nodeid})
-                            ok2 = wait_result_for_nodeid(w_local, nodeid)
+                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                            ok2 = wait_one_or_batch_results(w_local, [batch[0]])
                             if ok2:
                                 continue
-                        record_worker_failure(nodeid, "worker died before reporting result")
+                        record_worker_failure(batch[0], "worker died before reporting result")
                         while True:
                             try:
                                 remaining = work_q.get_nowait()
