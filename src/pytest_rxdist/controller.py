@@ -28,11 +28,13 @@ class RXDistController:
         num_workers: int,
         scheduler: str = "baseline",
         reuse_mode: str = "safe",
+        worker_kind: str = "python",
         debug: bool = False,
     ):
         self.num_workers = max(1, int(num_workers))
         self.scheduler = scheduler
         self.reuse_mode = reuse_mode
+        self.worker_kind = worker_kind if worker_kind in {"python", "rust"} else "python"
         self.debug = debug
 
         self.last_schedule: SmartSchedule | None = None
@@ -48,7 +50,15 @@ class RXDistController:
         env["PYTEST_RXDIST_WORKER"] = "1"
         env["PYTEST_RXDIST_REUSE"] = self.reuse_mode
         env["PYTEST_RXDIST_IPC"] = self.ipc_mode
-        cmd = [sys.executable, "-m", "pytest_rxdist._worker_main"]
+        if self.worker_kind == "rust":
+            # Execute the Rust worker harness inside the extension module.
+            cmd = [
+                sys.executable,
+                "-c",
+                "from pytest_rxdist import _core; raise SystemExit(_core.worker_main())",
+            ]
+        else:
+            cmd = [sys.executable, "-m", "pytest_rxdist._worker_main"]
         proc = subprocess.Popen(
             cmd,
             env=env,

@@ -53,6 +53,20 @@ def pytest_addoption(parser):
         help="IPC batch size (number of nodeids per message). Default: 1. (Milestone 5)",
     )
     group.addoption(
+        "--rxdist-engine",
+        action="store",
+        default="python",
+        choices=["python", "rust"],
+        help="Execution engine (python|rust). Default: python. (Rust acceleration)",
+    )
+    group.addoption(
+        "--rxdist-worker",
+        action="store",
+        default="python",
+        choices=["python", "rust"],
+        help="Worker implementation (python|rust). Default: python. (Rust acceleration)",
+    )
+    group.addoption(
         "--rxdist-fixture-grouping",
         action="store",
         default="off",
@@ -190,9 +204,32 @@ def pytest_runtestloop(session):
         num_workers=n,
         scheduler=config.getoption("rxdist_scheduler"),
         reuse_mode=config.getoption("rxdist_reuse"),
+        worker_kind=str(config.getoption("rxdist_worker") or "python"),
         debug=bool(config.getoption("--rxdist-debug")),
     )
-    results = controller.run(nodeids, units=units)
+    engine = (config.getoption("rxdist_engine") or "python").strip().lower()
+    if engine == "rust":
+        from .core import CORE_AVAILABLE
+
+        if CORE_AVAILABLE:
+            try:
+                from .rust_engine import run_session_rust
+
+                results = run_session_rust(
+                    nodeids=nodeids,
+                    units=units,
+                    num_workers=n,
+                    scheduler=str(config.getoption("rxdist_scheduler")),
+                    reuse_mode=str(config.getoption("rxdist_reuse")),
+                    debug=bool(config.getoption("--rxdist-debug")),
+                )
+            except Exception:
+                # Safe fallback: keep runs working even if Rust engine is partial.
+                results = controller.run(nodeids, units=units)
+        else:
+            results = controller.run(nodeids, units=units)
+    else:
+        results = controller.run(nodeids, units=units)
 
     reporter = config.pluginmanager.get_plugin("terminalreporter")
     if reporter is not None:
