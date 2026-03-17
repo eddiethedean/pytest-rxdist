@@ -12,6 +12,7 @@ def run_session_rust(
     num_workers: int,
     scheduler: str,
     reuse_mode: str,
+    worker_kind: str,
     debug: bool,
 ) -> list[dict[str, Any]]:
     """
@@ -30,6 +31,7 @@ def run_session_rust(
         int(num_workers),
         str(scheduler),
         str(reuse_mode),
+        str(worker_kind),
         bool(debug),
     )
 

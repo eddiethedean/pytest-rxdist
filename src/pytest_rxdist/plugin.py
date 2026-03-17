@@ -55,9 +55,9 @@ def pytest_addoption(parser):
     group.addoption(
         "--rxdist-engine",
         action="store",
-        default="python",
+        default="rust",
         choices=["python", "rust"],
-        help="Execution engine (python|rust). Default: python. (Rust acceleration)",
+        help="Execution engine (python|rust). Default: rust. (Rust acceleration)",
     )
     group.addoption(
         "--rxdist-worker",
@@ -221,6 +221,7 @@ def pytest_runtestloop(session):
                     num_workers=n,
                     scheduler=str(config.getoption("rxdist_scheduler")),
                     reuse_mode=str(config.getoption("rxdist_reuse")),
+                    worker_kind=str(config.getoption("rxdist_worker") or "python"),
                     debug=bool(config.getoption("--rxdist-debug")),
                 )
             except Exception:
@@ -258,13 +259,35 @@ def pytest_runtestloop(session):
 
     if config.getoption("--rxdist-debug") and reporter is not None:
         sched = config.getoption("rxdist_scheduler")
-        if sched == "smart" and getattr(controller, "last_schedule", None) is not None:
-            s = controller.last_schedule
-            reporter.write_line(
-                "pytest-rxdist: smart_schedule "
-                f"known={s.known_count} unknown={s.unknown_count} "
-                f"est_makespan={s.estimated_makespan_s:.3f}s"
-            )
+        if sched == "smart":
+            if getattr(controller, "last_schedule", None) is None and engine == "rust":
+                # Rust controller currently does scheduling internally; to preserve the existing
+                # debug stats line (used by tests), recompute schedule in-process for reporting only.
+                try:
+                    from .scheduler import smart_schedule_units, smart_schedule
+                    from .timing_store import TimingStore, default_timings_path
+
+                    timings_path = default_timings_path(Path.cwd())
+                    avg = {}
+                    if timings_path.exists():
+                        store = TimingStore.open(timings_path)
+                        try:
+                            avg = store.avg_durations(nodeids)
+                        finally:
+                            store.close()
+                    if units is not None:
+                        controller.last_schedule = smart_schedule_units(units, num_workers=n, avg_durations_s=avg)
+                    else:
+                        controller.last_schedule = smart_schedule(nodeids, num_workers=n, avg_durations_s=avg)
+                except Exception:
+                    controller.last_schedule = None
+            if getattr(controller, "last_schedule", None) is not None:
+                s = controller.last_schedule
+                reporter.write_line(
+                    "pytest-rxdist: smart_schedule "
+                    f"known={s.known_count} unknown={s.unknown_count} "
+                    f"est_makespan={s.estimated_makespan_s:.3f}s"
+                )
 
     if config.getoption("--rxdist-profile"):
         _write_timing_run(config, results)

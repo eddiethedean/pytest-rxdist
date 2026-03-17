@@ -6,13 +6,13 @@ The Python package name is **`pytest-rxdist`** (import as `pytest_rxdist`).
 
 ## Status
 
-Milestone 0–5 are implemented: the repo ships a minimal pytest plugin plus a tiny Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, a timing-informed smart scheduler, warm worker reuse, and optional shared-memory IPC for large payloads.
+Milestone 0–6 are implemented: the repo ships a pytest plugin plus a Rust core wired in via **PyO3 + maturin**, an MVP parallel runner, a local timing store foundation, a timing-informed smart scheduler, warm worker reuse, optional shared-memory IPC for large payloads, and fixture-aware grouping.
 
 Published on PyPI as `pytest-rxdist` (currently an early, experimental build).
 
 ## Requirements
 
-- **Python**: >= 3.10
+- **Python**: >= 3.8
 - **Rust (for source builds)**: >= 1.85 (edition 2024 / MSRV 1.85)
 
 ## Install
@@ -63,10 +63,36 @@ Enable timing persistence + summary output (Milestone 2):
 pytest -p pytest_rxdist --rxdist-profile
 ```
 
-Enable minimal debug output (reports whether the Rust extension loaded):
+Enable minimal debug output (reports whether the Rust extension loaded and which engine is in use):
 
 ```bash
 pytest -p pytest_rxdist --rxdist-debug
+```
+
+## Engine and worker selection
+
+The default configuration uses the **Rust engine** (controller) with a **Python worker harness**. You can adjust this per run:
+
+- `--rxdist-engine python` or `--rxdist-engine rust`
+- `--rxdist-worker python` or `--rxdist-worker rust`
+
+Examples:
+
+```bash
+# Baseline (Python engine + Python worker)
+pytest -p pytest_rxdist --numprocesses auto --rxdist-engine python --rxdist-worker python
+
+# Rust controller with Python worker (default behavior)
+pytest -p pytest_rxdist --numprocesses auto --rxdist-engine rust --rxdist-worker python
+
+# Rust controller with Rust worker harness
+pytest -p pytest_rxdist --numprocesses auto --rxdist-engine rust --rxdist-worker rust
+```
+
+If you suspect a regression or a compatibility issue, you can always fall back to the Python engine:
+
+```bash
+pytest -p pytest_rxdist --numprocesses auto --rxdist-engine python
 ```
 
 ## IPC options (Milestone 5)

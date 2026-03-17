@@ -37,6 +37,46 @@ def test_rust_engine_matches_python_engine_on_simple_suite(tmp_path: Path):
             pass
 
 
+def test_rust_engine_shm_batching_smoke(tmp_path: Path):
+    testfile = Path("tests/_rxdist_tmp_rust_shm_batch.py")
+    big = "Z" * 50000
+    testfile.write_text(
+        "import sys\n\n"
+        "def test_ok():\n"
+        f"    print({big!r})\n"
+        "    print('err', file=sys.stderr)\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+    try:
+        env = dict(os.environ)
+        env["PYTEST_RXDIST_SHM_THRESHOLD_BYTES"] = "1024"
+        p = _run_pytest(
+            [
+                "-p",
+                "pytest_rxdist",
+                "-q",
+                "--numprocesses",
+                "1",
+                "--rxdist-engine",
+                "rust",
+                "--rxdist-ipc",
+                "shm",
+                "--rxdist-ipc-batch-size",
+                "4",
+                str(testfile),
+            ],
+            env=env,
+        )
+        assert p.returncode == 0, p.stdout + "\n" + p.stderr
+        assert "1 passed" in (p.stdout + "\n" + p.stderr)
+    finally:
+        try:
+            testfile.unlink()
+        except OSError:
+            pass
+
+
 def test_rust_worker_harness_smoke(tmp_path: Path):
     testfile = Path("tests/_rxdist_tmp_rust_worker_smoke.py")
     testfile.write_text(
