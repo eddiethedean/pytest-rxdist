@@ -253,3 +253,80 @@ def test_ipc_shm_and_batching_smoke(tmp_path: Path):
         except OSError:
             pass
 
+
+def test_ipc_results_batch_path_many_tests(tmp_path: Path):
+    # Force run_batch/results_batch on multiple nodeids.
+    testfile = Path("tests/_rxdist_tmp_batch_suite.py")
+    parts = ["def test_0():\n    assert True\n\n"]
+    for i in range(1, 25):
+        parts.append(f"def test_{i}():\n    assert True\n\n")
+    testfile.write_text("".join(parts), encoding="utf-8")
+
+    try:
+        p = _run_pytest(
+            [
+                "-p",
+                "pytest_rxdist",
+                "-q",
+                "--numprocesses",
+                "1",
+                "--rxdist-reuse",
+                "safe",
+                "--rxdist-ipc",
+                "shm",
+                "--rxdist-ipc-batch-size",
+                "10",
+                str(testfile),
+            ],
+            env=_merged_env({"PYTEST_RXDIST_SHM_THRESHOLD_BYTES": "1024"}),
+        )
+        assert p.returncode == 0, p.stdout + "\n" + p.stderr
+        assert "25 passed" in (p.stdout + "\n" + p.stderr)
+    finally:
+        try:
+            testfile.unlink()
+        except OSError:
+            pass
+
+
+def test_ipc_mixed_inline_and_shm_payloads(tmp_path: Path):
+    # stdout large => shm, stderr small => inline (or empty)
+    big = "Y" * 50000
+    testfile = Path("tests/_rxdist_tmp_mixed_payload.py")
+    testfile.write_text(
+        "import sys\n\n"
+        "def test_mixed():\n"
+        f"    print({big!r})\n"
+        "    print('small_err', file=sys.stderr)\n"
+        "    assert True\n",
+        encoding="utf-8",
+    )
+
+    try:
+        p = _run_pytest(
+            [
+                "-p",
+                "pytest_rxdist",
+                "-q",
+                "--numprocesses",
+                "1",
+                "--rxdist-reuse",
+                "safe",
+                "--rxdist-ipc",
+                "shm",
+                "--rxdist-ipc-batch-size",
+                "4",
+                "--rxdist-debug",
+                str(testfile),
+            ],
+            env=_merged_env({"PYTEST_RXDIST_SHM_THRESHOLD_BYTES": "1024"}),
+        )
+        assert p.returncode == 0, p.stdout + "\n" + p.stderr
+        combined = p.stdout + "\n" + p.stderr
+        assert "ipc mode=shm" in combined
+    finally:
+        try:
+            testfile.unlink()
+        except OSError:
+            pass
+

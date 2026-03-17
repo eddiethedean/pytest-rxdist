@@ -212,10 +212,16 @@ class RXDistController:
                 i = 0
                 while i < len(queue_nodeids):
                     batch = queue_nodeids[i : i + max(1, self.ipc_batch_size)]
-                    if len(batch) == 1:
-                        send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
-                    else:
-                        send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+                    try:
+                        if len(batch) == 1:
+                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                        else:
+                            send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+                    except Exception:
+                        record_worker_failure(batch[0], "worker died before receiving work")
+                        for remaining in queue_nodeids[i + 1 :]:
+                            record_worker_failure(remaining, "worker died before running test")
+                        break
 
                     ok = wait_one_or_batch_results(w_local, batch)
                     if not ok:
@@ -225,8 +231,12 @@ class RXDistController:
                             assert w_local.proc.stdin is not None
                             assert w_local.proc.stdout is not None
                             # Retry current batch as single nodeid (simpler).
-                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
-                            ok2 = wait_one_or_batch_results(w_local, [batch[0]])
+                            try:
+                                send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                            except Exception:
+                                ok2 = False
+                            else:
+                                ok2 = wait_one_or_batch_results(w_local, [batch[0]])
                             if ok2:
                                 i += 1
                                 continue
@@ -236,7 +246,10 @@ class RXDistController:
                         break
                     i += len(batch)
                 if w_local.proc.stdin is not None:
-                    send_message(w_local.proc.stdin, "shutdown", {})
+                    try:
+                        send_message(w_local.proc.stdin, "shutdown", {})
+                    except Exception:
+                        pass
 
             threads = [
                 threading.Thread(
@@ -269,9 +282,29 @@ class RXDistController:
                         return
 
                     if len(batch) == 1:
-                        send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                        try:
+                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                        except Exception:
+                            record_worker_failure(batch[0], "worker died before receiving work")
+                            while True:
+                                try:
+                                    remaining = work_q.get_nowait()
+                                except queue.Empty:
+                                    break
+                                record_worker_failure(remaining, "worker died before running test")
+                            return
                     else:
-                        send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+                        try:
+                            send_message(w_local.proc.stdin, "run_batch", {"nodeids": batch})
+                        except Exception:
+                            record_worker_failure(batch[0], "worker died before receiving work")
+                            while True:
+                                try:
+                                    remaining = work_q.get_nowait()
+                                except queue.Empty:
+                                    break
+                                record_worker_failure(remaining, "worker died before running test")
+                            return
 
                     ok = wait_one_or_batch_results(w_local, batch)
                     if not ok:
@@ -280,8 +313,12 @@ class RXDistController:
                             w_local = respawn_worker(w_local)
                             assert w_local.proc.stdin is not None
                             assert w_local.proc.stdout is not None
-                            send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
-                            ok2 = wait_one_or_batch_results(w_local, [batch[0]])
+                            try:
+                                send_message(w_local.proc.stdin, "run", {"nodeid": batch[0]})
+                            except Exception:
+                                ok2 = False
+                            else:
+                                ok2 = wait_one_or_batch_results(w_local, [batch[0]])
                             if ok2:
                                 continue
                         record_worker_failure(batch[0], "worker died before reporting result")
