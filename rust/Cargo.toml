@@ -1,0 +1,13 @@
+[package]
+name = "pytest_rxdist_core"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+
+[lib]
+name = "pytest_rxdist_core"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.24", features = ["extension-module"] }

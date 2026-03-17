@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling>=1.24"]
-build-backend = "hatchling.build"
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
 
 [project]
 name = "pytest-rxdist"
@@ -22,6 +22,7 @@ dependencies = []
 [project.entry-points.pytest11]
 pytest_rxdist = "pytest_rxdist.plugin"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/pytest_rxdist"]
+[tool.maturin]
+python-source = "src"
+module-name = "pytest_rxdist._core"
 

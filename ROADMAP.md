@@ -21,6 +21,16 @@
 
 **Outcome**: a repo that builds a Python package with a minimal pytest plugin, and a Rust library wired via PyO3/maturin.
 
+- **Progress**
+  - [x] Python package `pytest-rxdist` (import `pytest_rxdist`) skeleton exists
+  - [x] `pytest11` entrypoint configured (`pytest_rxdist = "pytest_rxdist.plugin"`)
+  - [x] Switch build backend to `maturin` and configure `module-name = "pytest_rxdist_core"`
+  - [x] Add Rust crate under `rust/` with `edition = "2024"` and `rust-version = "1.85"`
+  - [x] Add a thin PyO3 surface (`engine_version`, `hello`)
+  - [x] Add Python bridge module `pytest_rxdist.core` for importing the extension
+  - [x] Add minimal in-repo `tests/` smoke suite (includes a Rust binding call)
+  - [x] Plugin remains serial (no parallelism yet); optional debug output via `--rxdist-debug`
+
 - **Deliverables**
   - Python package `pytest-rxdist` (import `pytest_rxdist`) with `pytest11` entrypoint (plugin auto-loadable).
   - Rust crate for the core engine with a thin PyO3 surface area.

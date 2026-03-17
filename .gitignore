@@ -14,6 +14,10 @@ dist/
 .eggs/
 wheels/
 pip-wheel-metadata/
+.maturin/
+
+# Built extension artifacts (editable builds may drop these in-tree)
+src/pytest_rxdist/*.so
 
 # --- Virtual environments ---
 .venv/
@@ -63,3 +67,6 @@ Thumbs.db
 
 # --- Logs ---
 *.log
+
+# --- Rust ---
+rust/target/
